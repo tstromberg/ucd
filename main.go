@@ -10,6 +10,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/fatih/color"
 	"github.com/google/generative-ai-go/genai"
 	"google.golang.org/api/option"
 
@@ -35,20 +36,22 @@ func init() {
 	flag.StringVar(&changesFile, "commit-messages", "", "File containing commit messages")
 	flag.StringVar(&changelogFile, "changelog", "", "File containing changelog entries")
 	flag.StringVar(&apiKey, "api-key", "", "Google API key for Gemini")
-	flag.StringVar(&modelName, "model", "", "Gemini model to use (default: gemini-2.0-flash)")
+	flag.StringVar(&modelName, "model", "gemini-2.0-flash", "Gemini model to use")
 	flag.BoolVar(&jsonOutput, "json", false, "Output results in JSON format")
 	flag.BoolVar(&debugMode, "debug", false, "Enable debug output")
 }
 
 func main() {
 	flag.Parse()
-	repoURL := ""
-	// Check for positional args for repo URL
-	args := flag.Args()
-	if len(args) >= 2 && args[0] == "git" {
-		repoURL = args[1]
-	}
 
+	validateInputs()
+	data := collectData()
+	result := analyzeData(data)
+	outputResult(result)
+}
+
+// validateInputs checks required parameters and environment variables
+func validateInputs() {
 	// Check for API key
 	if apiKey == "" {
 		apiKey = os.Getenv("GEMINI_API_KEY")
@@ -61,69 +64,89 @@ func main() {
 	if versionA == "" || versionB == "" {
 		log.Fatal("Both versions A and B are required.")
 	}
+}
+
+// collectData gathers the required information for analysis
+func collectData() *ucd.AnalysisData {
+	args := flag.Args()
+	repoURL := ""
+	if len(args) >= 2 && args[0] == "git" {
+		repoURL = args[1]
+	}
 
 	var data *ucd.AnalysisData
 	var err error
 
 	if repoURL != "" {
 		// Git repository mode
-		config := ucd.Config{
-			RepoURL:  repoURL,
-			VersionA: versionA,
-			VersionB: versionB,
-		}
-
-		if debugMode {
-			fmt.Fprintf(os.Stderr, "Analyzing Git repository: %s between %s and %s\n",
-				repoURL, versionA, versionB)
-		}
-
-		data, err = ucd.Collect(config)
-		if err != nil {
-			log.Fatalf("Error collecting data from Git repository: %v", err)
-		}
+		data, err = collectFromGit(repoURL)
 	} else {
-		// File mode - use existing logic
-		diffContent, err := readFileOrStdin(diffFile)
-		if err != nil {
-			log.Fatalf("Error reading diff: %v", err)
-		}
-
-		commitMessages, err := readFileOrStdin(changesFile)
-		if err != nil {
-			log.Fatalf("Error reading commit messages: %v", err)
-		}
-
-		changelog, err := readFileOrStdin(changelogFile)
-		if err != nil {
-			log.Fatalf("Error reading changelog: %v", err)
-		}
-
-		// Create analysis data
-		data = &ucd.AnalysisData{
-			VersionA:       versionA,
-			VersionB:       versionB,
-			Diff:           diffContent,
-			CommitMessages: commitMessages,
-			Changelog:      changelog,
-		}
-
-		// Debug output
-		if debugMode {
-			fmt.Fprintf(os.Stderr, "Analyzing diff between %s and %s\n", versionA, versionB)
-			fmt.Fprintf(os.Stderr, "Diff length: %d bytes\n", len(diffContent))
-			fmt.Fprintf(os.Stderr, "Commit messages length: %d bytes\n", len(commitMessages))
-			fmt.Fprintf(os.Stderr, "Changelog length: %d bytes\n", len(changelog))
-		}
+		// File mode
+		data, err = collectFromFiles()
 	}
 
-	// Debug output for git mode
-	if debugMode && repoURL != "" {
+	if err != nil {
+		log.Fatalf("Error collecting data: %v", err)
+	}
+
+	// Debug output
+	if debugMode {
 		fmt.Fprintf(os.Stderr, "Diff length: %d bytes\n", len(data.Diff))
 		fmt.Fprintf(os.Stderr, "Commit messages length: %d bytes\n", len(data.CommitMessages))
 		fmt.Fprintf(os.Stderr, "Changelog length: %d bytes\n", len(data.Changelog))
 	}
 
+	return data
+}
+
+// collectFromGit gathers data from a Git repository
+func collectFromGit(repoURL string) (*ucd.AnalysisData, error) {
+	if debugMode {
+		fmt.Fprintf(os.Stderr, "Analyzing Git repository: %s between %s and %s\n",
+			repoURL, versionA, versionB)
+	}
+
+	config := ucd.Config{
+		RepoURL:  repoURL,
+		VersionA: versionA,
+		VersionB: versionB,
+	}
+
+	return ucd.Collect(config)
+}
+
+// collectFromFiles gathers data from the specified files
+func collectFromFiles() (*ucd.AnalysisData, error) {
+	if debugMode {
+		fmt.Fprintf(os.Stderr, "Analyzing diff between %s and %s\n", versionA, versionB)
+	}
+
+	diffContent, err := readFileOrStdin(diffFile)
+	if err != nil {
+		return nil, fmt.Errorf("reading diff: %w", err)
+	}
+
+	commitMessages, err := readFileOrStdin(changesFile)
+	if err != nil {
+		return nil, fmt.Errorf("reading commit messages: %w", err)
+	}
+
+	changelog, err := readFileOrStdin(changelogFile)
+	if err != nil {
+		return nil, fmt.Errorf("reading changelog: %w", err)
+	}
+
+	return &ucd.AnalysisData{
+		VersionA:       versionA,
+		VersionB:       versionB,
+		Diff:           diffContent,
+		CommitMessages: commitMessages,
+		Changelog:      changelog,
+	}, nil
+}
+
+// analyzeData processes the collected data using the AI model
+func analyzeData(data *ucd.AnalysisData) *ucd.Result {
 	// Set up AI client
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
@@ -140,7 +163,11 @@ func main() {
 		log.Fatalf("Error analyzing changes: %v", err)
 	}
 
-	// Output in requested format
+	return result
+}
+
+// outputResult presents the analysis findings in the requested format
+func outputResult(result *ucd.Result) {
 	if jsonOutput {
 		outputJSON(result)
 	} else {
@@ -148,7 +175,7 @@ func main() {
 	}
 }
 
-// readFileOrStdin reads content from a file or stdin if filename is empty.
+// readFileOrStdin reads content from a file or returns empty string if filename is empty.
 func readFileOrStdin(filename string) (string, error) {
 	if filename == "" {
 		return "", nil
@@ -170,17 +197,38 @@ func outputJSON(result *ucd.Result) {
 	fmt.Println(string(jsonData))
 }
 
-// outputText prints the result in human-readable format.
+// outputText prints the result in human-readable format with colors and emojis.
 func outputText(r *ucd.Result) {
+	title := color.New(color.Bold, color.FgCyan).PrintlnFunc()
+	sectionTitle := color.New(color.Bold, color.FgBlue).PrintlnFunc()
+	highlight := color.New(color.Bold, color.FgYellow).SprintfFunc()
+	good := color.New(color.FgGreen).SprintfFunc()
+	warning := color.New(color.FgYellow).SprintfFunc()
+	danger := color.New(color.FgRed).SprintfFunc()
+
+	title("✨ UCD: Undocumented Change Detector ✨")
+	fmt.Printf("Comparing %s → %s\n\n", versionA, versionB)
+
 	// Output summary if available
 	if r.Summary != nil {
-		fmt.Printf("Summary:\n--------\n")
-		fmt.Printf("Risk rating: %d/10: %s\n", r.Summary.Rating, r.Summary.Description)
-		//		fmt.Printf("* Explanation: %s\n\n", r.Summary.Explanation)
+		sectionTitle("📊 SUMMARY")
+
+		// Choose emoji based on rating
+		var ratingDisplay string
+		switch {
+		case r.Summary.Rating <= 2:
+			ratingDisplay = good("🟢 %d/10", r.Summary.Rating)
+		case r.Summary.Rating <= 6:
+			ratingDisplay = warning("🟡 %d/10", r.Summary.Rating)
+		default:
+			ratingDisplay = danger("🔴 %d/10", r.Summary.Rating)
+		}
+
+		fmt.Printf("%s - %s\n\n", ratingDisplay, r.Summary.Description)
 	}
 
 	if len(r.Changes) == 0 {
-		fmt.Println("\nNo undocumented changes found.")
+		fmt.Println(good("✅ No undocumented changes found."))
 		return
 	}
 
@@ -191,12 +239,32 @@ func outputText(r *ucd.Result) {
 		return changes[i].Rating > changes[j].Rating
 	})
 
-	fmt.Printf("\n%d undocumented changes:\n", len(changes))
-	fmt.Printf("--------------------------\n")
+	sectionTitle(fmt.Sprintf("🔍 UNDOCUMENTED CHANGES (%d found)", len(changes)))
 
 	for _, change := range changes {
-		fmt.Printf("* [%d/10] %s\n", change.Rating, change.Description)
-		// Uncomment to show explanations
-		// fmt.Printf("   Explanation: %s\n\n", change.Explanation)
+		// Choose emoji based on rating
+		var icon string
+		switch {
+		case change.Rating <= 2:
+			icon = "✅"
+		case change.Rating <= 6:
+			icon = "⚠️"
+		default:
+			icon = "🚨"
+		}
+
+		// Choose color based on rating
+		var ratingDisplay string
+		switch {
+		case change.Rating <= 2:
+			ratingDisplay = good("%d/10", change.Rating)
+		case change.Rating <= 6:
+			ratingDisplay = warning("%d/10", change.Rating)
+		default:
+			ratingDisplay = danger("%d/10", change.Rating)
+		}
+
+		fmt.Printf("%s [%s] %s\n", icon, ratingDisplay, highlight(change.Description))
+		//	fmt.Printf("   %s\n\n", change.Explanation)
 	}
 }
