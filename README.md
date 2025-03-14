@@ -1,96 +1,57 @@
-# UCD - Undocumented Change Detector 🕵️‍♂️
+# 🕵️‍♂️ UCD: Undocumented Change Detector
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/tstromberg/ucd)](https://goreportcard.com/report/github.com/tstromberg/ucd)
 [![Go Reference](https://pkg.go.dev/badge/github.com/tstromberg/ucd.svg)](https://pkg.go.dev/github.com/tstromberg/ucd)
 
-UCD uses LLM magic to find hidden or undocumented changes between software versions
+**Don't let undocumented changes sneak by!** UCD, the Undocumented Change Detector, is your AI-powered tool to find hidden code shifts between software versions. Think of it as a detective for your codebase. 🐕‍🦺
 
-## Features ✨
+## ✨ Key Features
 
-- 🔍 Detects changes not mentioned in commit messages/changelogs
-- ⚠️ Rates changes from "Benign" to "Definitely Malicious"
-- 🌐 Works with Git repos or standalone diff files
-- 🤖 Powered by Google's Gemini AI
+* **🔍 Detects Hidden Changes:**  Uncovers code modifications missed in commit messages and changelogs.
+* **⚠️ Rates Risk Level:**  Classifies changes by potential risk – from minor to significant. 🟢🟡🔴
+* **🌐 Git & Diff Support:** Analyze Git repositories or standard diff files.
+* **🤖 Powered by Gemini AI:** Uses Google's Gemini for intelligent code analysis.
+* **📦 JSON Output Option:**  Get results in JSON format for scripting and automation.
 
-## Quick Start 🚀
-
-### Setup
+##  🚀 Quick Start
 
 ```bash
-# Install
 go install github.com/tstromberg/ucd@latest
-
-# Set your API key
-export GEMINI_API_KEY=your_gemini_api_key
+export GEMINI_API_KEY=YOUR_API_KEY  # Get your API key from Google AI Studio! 🔑
+ucd --a v0.25.3 --b v0.25.4 git https://github.com/chainguard-dev/apko.git
 ```
 
-### Examples
+##  🕹️ How to Use - Examples
 
 ```bash
-# Analyze Git repo
-ucd git https://github.com/example/repo.git v1.0.0 v1.1.0
-
-# Analyze diff file
-ucd diff changes.patch 1.0.0 1.1.0 [changelog.md] [commit-msgs.txt]
+ucd git https://github.com/repo/example.git v1.0.0 v1.1.0   # Analyze a Git repository
+ucd -diff changes.patch -a v1.0.0 -b v1.1.0               # Check a diff file
+ucd -json git ...                                        # Output in JSON format
+ucd -debug git ...                                       # Enable debug output
 ```
 
-## Example Output 📊
+**Important Flags:** `-a versionA`, `-b versionB`, `-diff file`
+
+## 📊 Example Output -  The Analysis Report
 
 ```
-Found 2 undocumented changes:
+✨ UCD: Undocumented Change Detector ✨
+Comparing v1.0.0 → v1.1.0
 
-1. [Suspicious] Added network connection to external server
-   Explanation: Undocumented external connection at startup
+📊 SUMMARY:
+🟡 5/10 - Moderate risk. Review changes.
 
-2. [Silent Security Fix] Fixed buffer overflow in parser
-   Explanation: Added bounds checking for security
+🔍 UNDOCUMENTED CHANGES (2 found)
+🔴 [8/10] Added network connection to external server
+🟢 [2/10] Minor text update in help message
 ```
 
-## Code Usage 💻
+##  📋 Requirements
 
-```go
-package main
+* Go 1.18+
+* Gemini API Key
+* Git (for Git repository analysis)
 
-import (
-	"context"
-	"fmt"
-	"log"
-	"os"
+##  🤝 Contribute
 
-	"github.com/tstromberg/ucd/pkg/ucd"
-	"github.com/google/generative-ai-go/genai"
-	"google.golang.org/api/option"
-)
-
-func main() {
-	ctx := context.Background()
-
-	// Setup
-	client, err := genai.NewClient(ctx, option.WithAPIKey(os.Getenv("GEMINI_API_KEY")))
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer client.Close()
-
-	// Analyze
-	service := ucd.NewService(ucd.NewAnalyzer(client))
-	result, err := service.AnalyzeGit(ctx,
-		"https://github.com/example/repo.git",
-		"v1.0.0",
-		"v1.1.0",
-	)
-
-	// Show results
-	fmt.Println(result.Format())
-}
-```
-
-## Requirements 📋
-
-- Go 1.18+
-- Gemini API key
-- Git (for repository analysis)
-
-## Contributing 🤝
-
-PRs welcome! Let's make software updates safer together.
+Pull requests are welcome! Help make software updates more transparent. 🎉

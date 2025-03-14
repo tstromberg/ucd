@@ -202,6 +202,7 @@ func outputText(r *ucd.Result) {
 	title := color.New(color.Bold, color.FgCyan).PrintlnFunc()
 	sectionTitle := color.New(color.Bold, color.FgBlue).PrintlnFunc()
 	highlight := color.New(color.Bold, color.FgYellow).SprintfFunc()
+
 	good := color.New(color.FgGreen).SprintfFunc()
 	warning := color.New(color.FgYellow).SprintfFunc()
 	danger := color.New(color.FgRed).SprintfFunc()
@@ -212,19 +213,18 @@ func outputText(r *ucd.Result) {
 	// Output summary if available
 	if r.Summary != nil {
 		sectionTitle("📊 SUMMARY")
-
-		// Choose emoji based on rating
-		var ratingDisplay string
+		rating := r.Summary.Rating
+		var emoji string
+		var ratingColor func(string, ...interface{}) string
 		switch {
-		case r.Summary.Rating <= 2:
-			ratingDisplay = good("🟢 %d/10", r.Summary.Rating)
-		case r.Summary.Rating <= 6:
-			ratingDisplay = warning("🟡 %d/10", r.Summary.Rating)
+		case rating <= 2:
+			emoji, ratingColor = "🟢", good
+		case rating <= 6:
+			emoji, ratingColor = "🟡", warning
 		default:
-			ratingDisplay = danger("🔴 %d/10", r.Summary.Rating)
+			emoji, ratingColor = "🔴", danger
 		}
-
-		fmt.Printf("%s - %s\n\n", ratingDisplay, r.Summary.Description)
+		fmt.Printf("%s %s - %s\n\n", ratingColor(emoji), ratingColor(fmt.Sprintf("%d/10", rating)), r.Summary.Description)
 	}
 
 	if len(r.Changes) == 0 {
@@ -233,38 +233,23 @@ func outputText(r *ucd.Result) {
 	}
 
 	// Sort changes from most severe to least severe
-	changes := make([]ucd.Assessment, len(r.Changes))
-	copy(changes, r.Changes)
-	sort.Slice(changes, func(i, j int) bool {
-		return changes[i].Rating > changes[j].Rating
-	})
+	changes := r.Changes
+	sort.Slice(changes, func(i, j int) bool { return changes[i].Rating > changes[j].Rating })
 
 	sectionTitle(fmt.Sprintf("🔍 UNDOCUMENTED CHANGES (%d found)", len(changes)))
 
 	for _, change := range changes {
-		// Choose emoji based on rating
-		var icon string
+		rating := change.Rating
+		var emoji string
+		var ratingColor func(string, ...interface{}) string
 		switch {
-		case change.Rating <= 2:
-			icon = "✅"
-		case change.Rating <= 6:
-			icon = "⚠️"
+		case rating <= 2:
+			emoji, ratingColor = "🟢", good
+		case rating <= 6:
+			emoji, ratingColor = "🟡", warning
 		default:
-			icon = "🚨"
+			emoji, ratingColor = "🔴", danger
 		}
-
-		// Choose color based on rating
-		var ratingDisplay string
-		switch {
-		case change.Rating <= 2:
-			ratingDisplay = good("%d/10", change.Rating)
-		case change.Rating <= 6:
-			ratingDisplay = warning("%d/10", change.Rating)
-		default:
-			ratingDisplay = danger("%d/10", change.Rating)
-		}
-
-		fmt.Printf("%s [%s] %s\n", icon, ratingDisplay, highlight(change.Description))
-		//	fmt.Printf("   %s\n\n", change.Explanation)
+		fmt.Printf("%s [%s] %s\n", ratingColor(emoji), ratingColor(fmt.Sprintf("%d/10", rating)), highlight(change.Description))
 	}
 }
