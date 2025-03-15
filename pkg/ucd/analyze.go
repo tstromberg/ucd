@@ -114,7 +114,7 @@ If there are no undocumented changes, return an empty changes array.
 func parseAIResponse(response string) (*Result, error) {
 	jsonText := extractJSON(response)
 	if jsonText == "" {
-		return nil, fmt.Errorf("couldn't extract JSON from response")
+		return nil, fmt.Errorf("couldn't extract JSON from response: %s", response)
 	}
 
 	if jsonText == "[]" {

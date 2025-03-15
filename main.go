@@ -18,23 +18,23 @@ import (
 )
 
 var (
-	versionA      string
-	versionB      string
-	diffFile      string
-	changesFile   string
-	changelogFile string
-	apiKey        string
-	modelName     string
-	jsonOutput    bool
-	debugMode     bool
+	versionA    string
+	versionB    string
+	diffFile    string
+	changesFile string
+	commitsFile string
+	apiKey      string
+	modelName   string
+	jsonOutput  bool
+	debugMode   bool
 )
 
 func init() {
-	flag.StringVar(&versionA, "a", "", "Version A (old version)")
-	flag.StringVar(&versionB, "b", "", "Version B (new version)")
+	flag.StringVar(&versionA, "a", "v0", "Version A (old version)")
+	flag.StringVar(&versionB, "b", "v1", "Version B (new version)")
 	flag.StringVar(&diffFile, "diff", "", "File containing unified diff")
-	flag.StringVar(&changesFile, "commit-messages", "", "File containing commit messages")
-	flag.StringVar(&changelogFile, "changelog", "", "File containing changelog entries")
+	flag.StringVar(&commitsFile, "commit-messages", "", "File containing commit messages")
+	flag.StringVar(&changesFile, "changelog", "", "File containing changelog entries")
 	flag.StringVar(&apiKey, "api-key", "", "Google API key for Gemini")
 	flag.StringVar(&modelName, "model", "gemini-2.0-flash", "Gemini model to use")
 	flag.BoolVar(&jsonOutput, "json", false, "Output results in JSON format")
@@ -44,14 +44,6 @@ func init() {
 func main() {
 	flag.Parse()
 
-	validateInputs()
-	data := collectData()
-	result := analyzeData(data)
-	outputResult(result)
-}
-
-// validateInputs checks required parameters and environment variables
-func validateInputs() {
 	// Check for API key
 	if apiKey == "" {
 		apiKey = os.Getenv("GEMINI_API_KEY")
@@ -60,29 +52,24 @@ func validateInputs() {
 		}
 	}
 
-	// Validate required parameters
-	if versionA == "" || versionB == "" {
-		log.Fatal("Both versions A and B are required.")
-	}
+	data := collectData()
+	result := analyzeData(data)
+	outputResult(result)
 }
 
 // collectData gathers the required information for analysis
 func collectData() *ucd.AnalysisData {
 	args := flag.Args()
-	repoURL := ""
-	if len(args) >= 2 && args[0] == "git" {
-		repoURL = args[1]
-	}
-
+	source := args[1]
 	var data *ucd.AnalysisData
 	var err error
 
-	if repoURL != "" {
+	if args[0] == "git" {
 		// Git repository mode
-		data, err = collectFromGit(repoURL)
+		data, err = collectFromGit(source)
 	} else {
 		// File mode
-		data, err = collectFromFiles()
+		data, err = collectFromFiles(source)
 	}
 
 	if err != nil {
@@ -116,32 +103,37 @@ func collectFromGit(repoURL string) (*ucd.AnalysisData, error) {
 }
 
 // collectFromFiles gathers data from the specified files
-func collectFromFiles() (*ucd.AnalysisData, error) {
+func collectFromFiles(diffFile string) (*ucd.AnalysisData, error) {
 	if debugMode {
 		fmt.Fprintf(os.Stderr, "Analyzing diff between %s and %s\n", versionA, versionB)
 	}
 
-	diffContent, err := readFileOrStdin(diffFile)
+	diff, err := os.ReadFile(diffFile)
 	if err != nil {
-		return nil, fmt.Errorf("reading diff: %w", err)
+		return nil, fmt.Errorf("readfile: %w", err)
+	}
+	var commits []byte
+	if commitsFile != "" {
+		commits, err = os.ReadFile(commitsFile)
+		if err != nil {
+			return nil, fmt.Errorf("readfile: %w", err)
+		}
 	}
 
-	commitMessages, err := readFileOrStdin(changesFile)
-	if err != nil {
-		return nil, fmt.Errorf("reading commit messages: %w", err)
-	}
-
-	changelog, err := readFileOrStdin(changelogFile)
-	if err != nil {
-		return nil, fmt.Errorf("reading changelog: %w", err)
+	var changelog []byte
+	if changesFile != "" {
+		changelog, err = os.ReadFile(changesFile)
+		if err != nil {
+			return nil, fmt.Errorf("readfile: %w", err)
+		}
 	}
 
 	return &ucd.AnalysisData{
 		VersionA:       versionA,
 		VersionB:       versionB,
-		Diff:           diffContent,
-		CommitMessages: commitMessages,
-		Changelog:      changelog,
+		Diff:           string(diff),
+		CommitMessages: string(commits),
+		Changelog:      string(changelog),
 	}, nil
 }
 
@@ -173,19 +165,6 @@ func outputResult(result *ucd.Result) {
 	} else {
 		outputText(result)
 	}
-}
-
-// readFileOrStdin reads content from a file or returns empty string if filename is empty.
-func readFileOrStdin(filename string) (string, error) {
-	if filename == "" {
-		return "", nil
-	}
-
-	content, err := os.ReadFile(filename)
-	if err != nil {
-		return "", fmt.Errorf("read file %s: %w", filename, err)
-	}
-	return string(content), nil
 }
 
 // outputJSON prints the result as formatted JSON.

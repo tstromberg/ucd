@@ -24,8 +24,8 @@ ucd --a v0.25.3 --b v0.25.4 git https://github.com/chainguard-dev/apko.git
 ##  🕹️ How to Use - Examples
 
 ```bash
-ucd git https://github.com/repo/example.git v1.0.0 v1.1.0   # Analyze a Git repository
-ucd -diff changes.patch -a v1.0.0 -b v1.1.0               # Check a diff file
+ucd git --a v1.0.0 --b v1.1.0 https://github.com/repo/example.git    # Analyze a Git repository
+ucd diff changes.patch                                     # Check a diff file
 ucd -json git ...                                        # Output in JSON format
 ucd -debug git ...                                       # Enable debug output
 ```
