@@ -15,9 +15,11 @@ var skipChangePattern = regexp.MustCompile(`(?i)\.gitignore|README|\.github/|CI 
 
 // Assessment represents an individual change or summary assessment.
 type Assessment struct {
-	Description string `json:"description"`
-	Rating      int    `json:"rating"`
-	Explanation string `json:"explanation"`
+	Description        string `json:"description"`
+	MalwareRisk        int    `json:"malware_risk"`
+	MalwareExplanation string `json:"malware_explanation"`
+	SilentPatch        int    `json:"silent_patch"`
+	SilentExplanation  string `json:"silent_explanation"`
 }
 
 // Result contains the analysis findings.
@@ -32,7 +34,10 @@ func AnalyzeChanges(ctx context.Context, client *genai.Client, data *AnalysisDat
 		modelName = "gemini-2.0-flash"
 	}
 
-	prompt := buildPrompt(data)
+	prompt, err := buildPrompt(data)
+	if err != nil {
+		return nil, fmt.Errorf("build prompt: %w", err)
+	}
 
 	model := client.GenerativeModel(modelName)
 	klog.V(1).Infof("prompt: %s", prompt)
@@ -52,7 +57,7 @@ func AnalyzeChanges(ctx context.Context, client *genai.Client, data *AnalysisDat
 }
 
 // buildPrompt constructs the prompt for the AI model.
-func buildPrompt(data *AnalysisData) string {
+func buildPrompt(data *AnalysisData) (string, error) {
 	prompt := fmt.Sprintf(`You are a security expert and malware analyst analyzing changes between two versions of a software package.
 I will provide:
 1. A unified diff between version %s and %s
@@ -60,9 +65,56 @@ I will provide:
 3. Changelog entries (if available)
 
 Your task is to identify any behavioral changes in the code that do not appear to be related to changes mentioned in the commit messages or changelog.
-When tying a behavior change to a Changelog entry or commit message, be loose with your interpretation.
+Be loose and liberal with your interpretation when relating code changes to a changelog entry or commit message.
 
-Focus especially on potentially malicious changes that aren't documented. Do not mention changes that appear to be refactors for readability, documentation, or performance improvements.
+We are trying to uncover two types of changes:
+
+- Malicious changes being snuck into the supply change: for example, credential theft, backdoors, exfiltration, or data wipers
+- Silently fixed security vulnerabilities (CVE's), for example: directory traversal, buffer overflows
+
+For each undocumented behavioral change you identify:
+1. Briefly describe the undocumented change in 15 words or less.
+2. Give the undocumented change a malice rating, from 0-10 (0=Benign, 5=Suspicious, 10=Extremely Dangerous)
+   * Don't worry if the code is adding new functionality that may accidentally introduce a security vulnerability,
+such as potential code execution risk, but do care if the undocumented behaviors appear to be malicious, for example:
+adding a backdoor, downloading software, calling chmod to make programs executable, introducing malicious behaviors or add undocumented obfuscation to avoid code analysis.
+3. Give the undocumented change a silent security fix rating, based on how likely and critical you think the security patch might have been.
+   If the code authors mention "security fix" or "CVE" in the changelog or commit messages relating to the delta between these two versions,
+   it is less likely to see hidden silent security fixes.
+4. For each rating, provide a 1-sentence explanation of how you arrived to your conclusion.
+
+Thinking how a security engineer would reason about a combination of security threats or analyze software, you
+you also need to take a step back and consider the overall impact of all of the undocumented changes to assess a
+combined "malice" and "silent security fix" score.
+
+In general, most software should score 0-1.
+
+Here are undocumented behavioral changes to ignore:
+- Changes to .github/workflows/ files - as they do not impact the behavior of the software
+- Changes to documentation (.md files, for example) - as they do not impact the behavior of the software
+- Performance improvements
+- Changes that may be related to code refactoring
+
+Focus on behavioral changes that could be construed as malicious or a fix for an undocumented critical security vulnerability.
+
+Format your response as a JSON object with:
+- "changes": An array of JSON objects, each with:
+  - "description": A brief description of the undocumented change
+  - "malware_risk": 0-10 danger scale of this change (0=Benign, 5=Suspicious, 10=Extremely Dangerous)
+  - "malware_explanation": Your explanation for your malware risk rating.
+  - "silent_patch": 0-10 likelihood of a silent critical security patch (0=Benign, 5=Suspicious, 10=Extremely Dangerous)
+  - "silent_explanation": Your explanation for your silent_Patch rating.
+
+- "summary": A JSON object that assesses the combined impact:
+  - "description": A 1-sentence description of the combined undocumented behavioral changes.
+  - "malware_risk": 0-10 danger scale of all combined changes considered together (0=Benign, 5=Suspicious, 10=Extremely Dangerous)
+  - "malware_explanation": Your explanation for your combined malware risk rating.
+  - "silent_patch": 0-10 likelihood of a silent critical security patch introduced in this version change (0=Benign, 5=Suspicious, 10=Extremely Dangerous)
+  - "silent_explanation": Your explanation for your combined silent_patch rating.
+
+If there are no undocumented behavior changes, return an empty changes array. Your response must be in JSON form to be understood.
+
+Here are the details to analyze:
 
 UNIFIED DIFF:
 %s
@@ -72,42 +124,14 @@ COMMIT MESSAGES:
 
 CHANGELOG CHANGES:
 %s
-
-For each undocumented behavioral change you identify:
-1. Briefly describe the undocumented change in 15 words or less.
-2. Rate each change from 0-10, (0=Benign, 5=Suspicious, 10=Extremely Dangerous)
-3. Provide a brief explanation for your rating of each change
-
-You shouldn't care if the code is adding new functionality that may accidentally introduce a security vulnerability,
-such as potential code execution risk, but do care if the undocumented behaviors appear to be malicious, for example:
-adding a backdoor, downloading software, calling chmod to make programs executable, introducing malicious behaviors or add undocumented obfuscation to avoid code analysis.
-
-Thinking how a security engineer would reason about malicious software that runs on someones computer,
-you also need to take a step back and consider the overall impact of all of the undocumented changes to assess a combined impact score.
-
-Format your response as a JSON object with:
-- "changes": An array of objects, each with:
-  - "description": A brief description of the undocumented change
-  - "rating": 0-10 danger scale (0=Benign, 5=Suspicious, 10=Extremely Dangerous)
-  - "explanation": Your explanation for the rating
-
-- "summary": An object that assesses the combined impact:
-  - "description": A 1-sentence description of the combined undocumented behavioral changes.
-  - "rating": 0-10 danger scale (0=Benign, 5=Suspicious, 10=Extremely Dangerous.), considering all undocumented behavioral changes.
-  - "explanation": A 1-sentence explanation of how you arrived at this rating.
-
-In general, most software should score 0-1. Changes to GitHub Action configurations or
-documentation changes should always be considered benign, as they have no impact to an end-user.
-
-If there are no undocumented changes, return an empty changes array.
 `, data.VersionA, data.VersionB, data.Diff, data.CommitMessages, data.Changelog)
 
 	// Truncate if too long
-	const maxPromptLength = 100000
+	const maxPromptLength = 2000000
 	if len(prompt) > maxPromptLength {
-		return prompt[:maxPromptLength]
+		return "", fmt.Errorf("too much data to analyze (%d length)", maxPromptLength)
 	}
-	return prompt
+	return prompt, nil
 }
 
 // parseAIResponse extracts structured information from the AI response.
@@ -130,7 +154,7 @@ func parseAIResponse(response string) (*Result, error) {
 
 // extractJSON retrieves JSON data from a response string.
 func extractJSON(response string) string {
-	klog.V(1).Infof("response: %s", response)
+	klog.Infof("response: %s", response)
 
 	// Try code block first (most specific)
 	codeBlockRegex := regexp.MustCompile("```(?:json)?\\n?(\\{.*?\\}|\\[.*?\\])\\n?```")

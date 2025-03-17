@@ -178,57 +178,105 @@ func outputJSON(result *ucd.Result) {
 
 // outputText prints the result in human-readable format with colors and emojis.
 func outputText(r *ucd.Result) {
-	title := color.New(color.Bold, color.FgCyan).PrintlnFunc()
-	sectionTitle := color.New(color.Bold, color.FgBlue).PrintlnFunc()
-	highlight := color.New(color.Bold, color.FgYellow).SprintfFunc()
+	// Setup formatters
+	titleFmt := color.New(color.Bold, color.FgCyan).PrintlnFunc()
+	sectionFmt := color.New(color.Bold, color.FgBlue).PrintlnFunc()
+	highlight := color.New(color.Bold, color.FgYellow).SprintFunc()
+	good := color.New(color.FgGreen).SprintFunc()
+	warning := color.New(color.FgYellow).SprintFunc()
+	danger := color.New(color.FgRed).SprintFunc()
 
-	good := color.New(color.FgGreen).SprintfFunc()
-	warning := color.New(color.FgYellow).SprintfFunc()
-	danger := color.New(color.FgRed).SprintfFunc()
-
-	title("✨ UCD: Undocumented Change Detector ✨")
+	titleFmt("✨ UCD: Undocumented Change Detector ✨")
 	fmt.Printf("Comparing %s → %s\n\n", versionA, versionB)
+
+	// Helper functions for consistent formatting
+	getRatingDisplay := func(rating int, isMalware bool) (string, func(a ...interface{}) string) {
+		if isMalware {
+			// Malware emojis
+			switch {
+			case rating <= 2:
+				return "🔒", good
+			case rating <= 6:
+				return "⚠️", warning
+			default:
+				return "🚨", danger
+			}
+		} else {
+			// Security patch emojis
+			switch {
+			case rating <= 2:
+				return "🛡️ ", good
+			case rating <= 6:
+				return "🔧", warning
+			default:
+				return "🔓", danger
+			}
+		}
+	}
 
 	// Output summary if available
 	if r.Summary != nil {
-		sectionTitle("📊 SUMMARY")
-		rating := r.Summary.Rating
-		var emoji string
-		var ratingColor func(string, ...interface{}) string
-		switch {
-		case rating <= 2:
-			emoji, ratingColor = "🟢", good
-		case rating <= 6:
-			emoji, ratingColor = "🟡", warning
-		default:
-			emoji, ratingColor = "🔴", danger
-		}
-		fmt.Printf("%s %s - %s\n\n", ratingColor(emoji), ratingColor(fmt.Sprintf("%d/10", rating)), r.Summary.Description)
+		sectionFmt("📊 RISK SUMMARY")
+
+		// Display malware risk
+		malwareEmoji, malwareColor := getRatingDisplay(r.Summary.MalwareRisk, true)
+		fmt.Printf("%s %s - malware\n",
+			malwareColor(malwareEmoji),
+			malwareColor(fmt.Sprintf("%d/10", r.Summary.MalwareRisk)))
+
+		// Display security patch risk
+		securityEmoji, securityColor := getRatingDisplay(r.Summary.SilentPatch, false)
+		fmt.Printf("%s %s - silent security patches\n",
+			securityColor(securityEmoji),
+			securityColor(fmt.Sprintf("%d/10", r.Summary.SilentPatch)))
+
+		fmt.Printf("\n%s\n\n", r.Summary.Description)
 	}
 
 	if len(r.Changes) == 0 {
-		fmt.Println(good("✅ No undocumented changes found."))
+		fmt.Println(good("✅ No undocumented behavioral changes found."))
 		return
 	}
 
-	// Sort changes from most severe to least severe
+	// Sort changes by maximum severity
 	changes := r.Changes
-	sort.Slice(changes, func(i, j int) bool { return changes[i].Rating > changes[j].Rating })
+	sort.Slice(changes, func(i, j int) bool {
+		iMax := max(changes[i].MalwareRisk, changes[i].SilentPatch)
+		jMax := max(changes[j].MalwareRisk, changes[j].SilentPatch)
+		return iMax > jMax
+	})
 
-	sectionTitle(fmt.Sprintf("🔍 UNDOCUMENTED CHANGES (%d found)", len(changes)))
+	sectionFmt(fmt.Sprintf("🔍 UNDOCUMENTED BEHAVIOR CHANGES (%d found)", len(changes)))
 
 	for _, change := range changes {
-		rating := change.Rating
-		var emoji string
-		var ratingColor func(string, ...interface{}) string
-		switch {
-		case rating <= 2:
-			emoji, ratingColor = "🟢", good
-		case rating <= 6:
-			emoji, ratingColor = "🟡", warning
-		default:
-			emoji, ratingColor = "🔴", danger
+		// Print basic change information
+		fmt.Printf("- %s\n", highlight(change.Description))
+
+		// Show malware risk if significant
+		if change.MalwareRisk > 5 {
+			malwareEmoji, malwareColor := getRatingDisplay(change.MalwareRisk, true)
+			fmt.Printf("  %s %s %s\n",
+				malwareEmoji,
+				malwareColor(fmt.Sprintf("%d/10 malware risk:", change.MalwareRisk)),
+				change.MalwareExplanation)
 		}
-		fmt.Printf("%s [%s] %s\n", ratingColor(emoji), ratingColor(fmt.Sprintf("%d/10", rating)), highlight(change.Description))
+
+		// Show security patch risk if significant
+		if change.SilentPatch > 5 {
+			securityEmoji, securityColor := getRatingDisplay(change.SilentPatch, false)
+			fmt.Printf("  %s %s %s\n",
+				securityEmoji,
+				securityColor(fmt.Sprintf("%d/10 hidden security patch:", change.SilentPatch)),
+				change.SilentExplanation)
+		}
+
 	}
+}
+
+// Helper function to get the maximum of two integers
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

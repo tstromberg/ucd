@@ -42,8 +42,10 @@ func Collect(cfg Config) (*AnalysisData, error) {
 		cfg.VersionB = "v1"
 	}
 
-	var diff, commitMsgs, changelog string
-	var err error
+	var (
+		diff, commitMsgs, changelog string
+		err                         error
+	)
 
 	if cfg.RepoURL != "" {
 		// Git repository analysis mode
@@ -66,6 +68,26 @@ func Collect(cfg Config) (*AnalysisData, error) {
 	}, nil
 }
 
+// runCommand is a helper function that executes a command and returns its output with better error handling.
+func runCommand(dir string, name string, args ...string) (string, error) {
+	cmd := exec.Command(name, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err != nil {
+		// Include stderr in error message for better debugging
+		return "", fmt.Errorf("%s command failed: %v\nStderr: %s", name, err, stderr.String())
+	}
+
+	return stdout.String(), nil
+}
+
 // collectFromGit extracts data from a Git repository.
 func collectFromGit(cfg Config) (diff, commitMsgs, changelog string, err error) {
 	// Check if git is available
@@ -81,32 +103,26 @@ func collectFromGit(cfg Config) (diff, commitMsgs, changelog string, err error) 
 	defer os.RemoveAll(tempDir)
 
 	// Clone the repository
-	cmd := exec.Command("git", "clone", "--quiet", cfg.RepoURL, tempDir)
-	out, err := cmd.CombinedOutput()
+	_, err = runCommand("", "git", "clone", "--quiet", cfg.RepoURL, tempDir)
 	if err != nil {
-		return "", "", "", fmt.Errorf("git clone failed: %s: %w", bytes.TrimSpace(out), err)
+		return "", "", "", err
 	}
 
 	// Generate diff
-	cmd = exec.Command("git", "diff", cfg.VersionA, cfg.VersionB)
-	cmd.Dir = tempDir
-	out, err = cmd.Output()
+	diff, err = runCommand(tempDir, "git", "diff", cfg.VersionA, cfg.VersionB)
 	if err != nil {
-		return "", "", "", fmt.Errorf("git diff failed: %w", err)
+		return "", "", "", err
 	}
-	diff = string(out)
 
 	// Extract commit messages
-	cmd = exec.Command("git", "log", "--pretty=format:%s", cfg.VersionA+".."+cfg.VersionB)
-	cmd.Dir = tempDir
-	out, err = cmd.Output()
+	commitMsgs, err = runCommand(tempDir, "git", "log", "--pretty=format:%s",
+		fmt.Sprintf("%s..%s", cfg.VersionA, cfg.VersionB))
 	if err != nil {
-		return "", "", "", fmt.Errorf("git log failed: %w", err)
+		return "", "", "", err
 	}
-	commitMsgs = string(out)
 
-	// Extract changelog
-	changelog, _ = getChangelogFromGit(tempDir, cfg.VersionA, cfg.VersionB) // Non-fatal if fails
+	// Extract changelog (non-fatal if it fails)
+	changelog, _ = getChangelogFromGit(tempDir, cfg.VersionA, cfg.VersionB)
 	if changelog == "" {
 		changelog = "No CHANGELOG found."
 	}
@@ -123,6 +139,7 @@ func getChangelogFromGit(repoDir, versionA, versionB string) (string, error) {
 		"CHANGES.md", "changes.md",
 	}
 
+	// Find the first matching changelog file
 	var changelogFile string
 	for _, pattern := range patterns {
 		matches, _ := filepath.Glob(filepath.Join(repoDir, pattern))
@@ -136,43 +153,54 @@ func getChangelogFromGit(repoDir, versionA, versionB string) (string, error) {
 		return "", fmt.Errorf("no changelog file found")
 	}
 
+	// Get relative path for git commands
 	relPath, err := filepath.Rel(repoDir, changelogFile)
 	if err != nil {
 		relPath = filepath.Base(changelogFile)
 	}
 
-	// Get changelog at version A
-	cmdA := exec.Command("git", "show", versionA+":"+relPath)
-	cmdA.Dir = repoDir
-	contentA, err := cmdA.Output()
+	// Get changelog contents at both versions
+	contentA, err := runCommand(repoDir, "git", "show", versionA+":"+relPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to get changelog at version %s: %w", versionA, err)
 	}
 
-	// Get changelog at version B
-	cmdB := exec.Command("git", "show", versionB+":"+relPath)
-	cmdB.Dir = repoDir
-	contentB, err := cmdB.Output()
+	contentB, err := runCommand(repoDir, "git", "show", versionB+":"+relPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to get changelog at version %s: %w", versionB, err)
 	}
 
-	// Create a diff of the changelog
+	// Create a diff of the changelog using the diff command
+	// Note: We don't use runCommand here because diff returns non-zero exit code for differences
 	cmd := exec.Command("diff", "-u", "--label", versionA, "--label", versionB, "-", "-")
-	cmd.Stdin = io.MultiReader(bytes.NewReader(contentA), strings.NewReader("\n"), bytes.NewReader(contentB))
-	output, _ := cmd.Output() // Ignore error since diff returns non-zero for differences
+	cmd.Stdin = io.MultiReader(
+		strings.NewReader(contentA),
+		strings.NewReader("\n"),
+		strings.NewReader(contentB),
+	)
 
-	return string(output), nil
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	// Ignore error since diff returns non-zero for differences
+	_ = cmd.Run()
+
+	// If there's something in stderr, it might indicate a real error
+	if stderr.Len() > 0 {
+		return stdout.String(), fmt.Errorf("diff command warning: %s", stderr.String())
+	}
+
+	return stdout.String(), nil
 }
 
 // collectFromFiles extracts data from provided files.
 func collectFromFiles(cfg Config) (diff, commitMsgs, changelog string, err error) {
 	// Read diff file
 	if cfg.DiffPath == "" {
-		return "", "", "", fmt.Errorf("diff file not found")
+		return "", "", "", fmt.Errorf("diff file path not provided")
 	}
 
-	// Inline the readFile function
 	diffData, err := os.ReadFile(cfg.DiffPath)
 	if err != nil {
 		return "", "", "", fmt.Errorf("failed to read diff file: %w", err)
@@ -186,7 +214,7 @@ func collectFromFiles(cfg Config) (diff, commitMsgs, changelog string, err error
 	if cfg.ChangelogPath != "" {
 		changelogData, err := os.ReadFile(cfg.ChangelogPath)
 		if err != nil {
-			changelog = "Failed to read CHANGELOG."
+			changelog = fmt.Sprintf("Failed to read CHANGELOG: %v", err)
 		} else {
 			changelog = string(changelogData)
 		}
