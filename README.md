@@ -1,53 +1,79 @@
 # UCD: Undocumented Change Detector
 
+UCD helps security teams detect hidden code changes between software versions using Google's Gemini AI.
+
 [![Go Report Card](https://goreportcard.com/badge/github.com/tstromberg/ucd)](https://goreportcard.com/report/github.com/tstromberg/ucd)
 [![Go Reference](https://pkg.go.dev/badge/github.com/tstromberg/ucd.svg)](https://pkg.go.dev/github.com/tstromberg/ucd)
 
-UCD is an experimental AI-powered tool that identifies hidden code changes between software versions. It helps security teams detect undocumented modifications that might introduce security risks.
+> **Note:** Experimental project. Results should be manually verified.
 
-> **Note:** This is an experimental project. Analysis results may vary in accuracy and should be manually verified.
-
-## Features
-
-* Detects hidden code changes missed in documentation
-* Assesses risk for potential malware and silent security patches
-* Supports Git repositories and diff files
-* Uses Google's Gemini AI for analysis
-* Provides JSON output for integration with other tools
-
-## Quick Start
+## Install
 
 ```bash
 go install github.com/tstromberg/ucd@latest
-export GEMINI_API_KEY=YOUR_API_KEY  # From Google AI Studio
-ucd --a v1.0.0 --b v1.1.0 git https://github.com/repo/example.git
 ```
 
 ## Usage
 
 ```bash
-# Analyze Git repository
-ucd --a v0.25.3 --b v0.25.4 git https://github.com/org/repo.git
+# Set API key
+export GEMINI_API_KEY=YOUR_API_KEY
 
-# Analyze diff file
-ucd diff changes.patch
+# Analyze a Git repository
+ucd git https://github.com/org/repo.git
 
-# Use with additional options
-ucd --json --model gemini-2.0-flash git --a v1.0 --b v1.1 https://github.com/org/repo.git
+# Compare specific versions
+ucd -a v0.25.3 -b v0.25.4 git https://github.com/org/repo.git
+
+# Analyze a local diff file
+ucd file changes.patch
+
+# Output in JSON format
+ucd -json git https://github.com/org/repo.git
 ```
 
-## Key Options
+## Go API Example
 
-```
---a string          Old version (default "v0")
---b string          New version (default "v1")
---diff string       Unified diff file
---commit-messages   Commit messages file
---changelog         Changelog file
---api-key string    Gemini API key
---model string      AI model (default "gemini-2.0-flash")
---json              Output as JSON
---debug             Enable debug output
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+
+	"github.com/google/generative-ai-go/genai"
+	"github.com/tstromberg/ucd/pkg/ucd"
+	"google.golang.org/api/option"
+)
+
+func main() {
+	// Collect data
+	data, err := ucd.Collect(ucd.Config{
+		RepoURL:  "https://github.com/example/repo",
+		VersionA: "v1.0.0",
+		VersionB: "v1.1.0",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Analyze changes
+	ctx := context.Background()
+	client, err := genai.NewClient(ctx, option.WithAPIKey("YOUR_API_KEY"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer client.Close()
+
+	result, err := ucd.AnalyzeChanges(ctx, client, data, "gemini-2.0-flash")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Process results
+	fmt.Printf("Found %d undocumented changes\n", len(result.UndocumentedChanges))
+}
 ```
 
 ## Requirements
@@ -55,7 +81,3 @@ ucd --json --model gemini-2.0-flash git --a v1.0 --b v1.1 https://github.com/org
 * Go 1.18+
 * Gemini API Key
 * Git (for repository analysis)
-
-## Contributing
-
-Contributions welcome! As this is an experimental tool, we value feedback and improvements.
