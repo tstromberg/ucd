@@ -24,8 +24,9 @@ type Assessment struct {
 
 // Result contains the analysis findings.
 type Result struct {
-	Changes []Assessment `json:"changes"`
-	Summary *Assessment  `json:"summary,omitempty"`
+	Input               *AnalysisData `json:"input"`
+	UndocumentedChanges []Assessment  `json:"undocumented_changes"`
+	Summary             *Assessment   `json:"summary,omitempty"`
 }
 
 // AnalyzeChanges performs AI-based analysis of code changes.
@@ -52,65 +53,54 @@ func AnalyzeChanges(ctx context.Context, client *genai.Client, data *AnalysisDat
 
 	responseText := string(resp.Candidates[0].Content.Parts[0].(genai.Text))
 	r, err := parseAIResponse(responseText)
+	if err != nil {
+		return nil, fmt.Errorf("parse failure: %w", err)
+	}
+	r.Input = data
 	klog.V(1).Infof("result: %+v", r)
 	return r, err
 }
 
 // buildPrompt constructs the prompt for the AI model.
 func buildPrompt(data *AnalysisData) (string, error) {
-	prompt := fmt.Sprintf(`You are a security expert and malware analyst analyzing changes between two versions of a software package.
+	prompt := fmt.Sprintf(`
+You are a security expert and malware analyst studying the changes between two versions of an
+open-source program that you are not familiar with.
+
 I will provide:
-1. A unified diff between version %s and %s
+
+1. A unified diff of changes between version %s and %s collected from %s
 2. Commit messages describing changes (if available)
 3. Changelog entries (if available)
 
-Your task is to identify any behavioral changes in the code that do not appear to be related to changes mentioned in the commit messages or changelog.
-Be loose and liberal with your interpretation when relating code changes to a changelog entry or commit message.
+Your task is to determine if there are behavior changes present in the unified diff that are not documented
+by either the commit messages or changelog.
 
-We are trying to uncover two types of changes:
-
-- Malicious changes being snuck into the supply change: for example, credential theft, backdoors, exfiltration, or data wipers
-- Silently fixed security vulnerabilities (CVE's), for example: directory traversal, buffer overflows
-
-For each undocumented behavioral change you identify:
-1. Briefly describe the undocumented change in 15 words or less.
-2. Give the undocumented change a malice rating, from 0-10 (0=Benign, 5=Suspicious, 10=Extremely Dangerous)
-   * Don't worry if the code is adding new functionality that may accidentally introduce a security vulnerability,
-such as potential code execution risk, but do care if the undocumented behaviors appear to be malicious, for example:
-adding a backdoor, downloading software, calling chmod to make programs executable, introducing malicious behaviors or add undocumented obfuscation to avoid code analysis.
-3. Give the undocumented change a silent security fix rating, based on how likely and critical you think the security patch might have been.
-   If the code authors mention "security fix" or "CVE" in the changelog or commit messages relating to the delta between these two versions,
-   it is less likely to see hidden silent security fixes.
-4. For each rating, provide a 1-sentence explanation of how you arrived to your conclusion.
-
-Thinking how a security engineer would reason about a combination of security threats or analyze software, you
-you also need to take a step back and consider the overall impact of all of the undocumented changes to assess a
-combined "malice" and "silent security fix" score.
-
-In general, most software should score 0-1.
-
-Here are undocumented behavioral changes to ignore:
-- Changes to .github/workflows/ files - as they do not impact the behavior of the software
-- Changes to documentation (.md files, for example) - as they do not impact the behavior of the software
-- Performance improvements
-- Changes that may be related to code refactoring
-
-Focus on behavioral changes that could be construed as malicious or a fix for an undocumented critical security vulnerability.
+- Be loose in your interpretation of how a diff change
+may be related to a commit message or changelog entry.
+- Don't include undocumented code health improvements that often appear alongside feature changes.
+  * For example, don't include documentation updates, changes that can come up in code refactoring, CI/CD configuration changes, or performance improvements.
+- Ignore changes to files within the .github directory, as they will not impact the users of this tool.
+- Unless you know of a specific security threat for a package version, assume that dependency version bumps are not part of a silent security fix.
 
 Format your response as a JSON object with:
-- "changes": An array of JSON objects, each with:
-  - "description": A brief description of the undocumented change
-  - "malware_risk": 0-10 danger scale of this change (0=Benign, 5=Suspicious, 10=Extremely Dangerous)
-  - "malware_explanation": Your explanation for your malware risk rating.
-  - "silent_patch": 0-10 likelihood of a silent critical security patch (0=Benign, 5=Suspicious, 10=Extremely Dangerous)
-  - "silent_explanation": Your explanation for your silent_Patch rating.
 
-- "summary": A JSON object that assesses the combined impact:
-  - "description": A 1-sentence description of the combined undocumented behavioral changes.
+- "undocumented_changes": An array of JSON objects for each undocumented behavioral change that could impact a user of this program, each with:
+  - "description": A concise 1-sentence description of the undocumented behavioral change
+  - "malware_risk": 0-10 danger scale of this undocumented change being malicious in nature. For example, could this undocumented change
+        represent the addition of code for credential exfiltration, a backdoor, or a data wiper? (0=Benign, 5=Suspicious, 10=Extremely Dangerous)
+  - "malware_explanation": A 1-sentence explanation for the given malware_risk rating.
+  - "silent_patch": 0-10 likelihood of this undocumented change representing a hidden critical security patch (0=Benign, 5=Suspicious, 10=Extremely Dangerous)
+  - "silent_explanation": Your explanation for your silent_patch rating.
+
+- "summary": A JSON object that assesses the combined impact of the undocumented behavioral changes you've found:
+  - "description": A concise 1-sentence description of the combined undocumented behavioral changes.
   - "malware_risk": 0-10 danger scale of all combined changes considered together (0=Benign, 5=Suspicious, 10=Extremely Dangerous)
-  - "malware_explanation": Your explanation for your combined malware risk rating.
+  - "malware_explanation": A 1-sentence explanation for your combined malware risk rating.
   - "silent_patch": 0-10 likelihood of a silent critical security patch introduced in this version change (0=Benign, 5=Suspicious, 10=Extremely Dangerous)
   - "silent_explanation": Your explanation for your combined silent_patch rating.
+
+Do not include changes mentioned in the Changelog or commit messages.
 
 If there are no undocumented behavior changes, return an empty changes array. Your response must be in JSON form to be understood.
 
@@ -124,7 +114,9 @@ COMMIT MESSAGES:
 
 CHANGELOG CHANGES:
 %s
-`, data.VersionA, data.VersionB, data.Diff, data.CommitMessages, data.Changelog)
+
+Ensure that the returned data is in valid JSON form.
+`, data.VersionA, data.VersionB, data.Source, data.Diff, data.CommitMessages, data.Changelog)
 
 	// Truncate if too long
 	const maxPromptLength = 2000000
@@ -149,12 +141,15 @@ func parseAIResponse(response string) (*Result, error) {
 	// Try to unmarshal as Result structure first
 	var result Result
 	err := json.Unmarshal([]byte(jsonText), &result)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshal: %v\ncontent: %s", err, jsonText)
+	}
 	return &result, err
 }
 
 // extractJSON retrieves JSON data from a response string.
 func extractJSON(response string) string {
-	klog.Infof("response: %s", response)
+	//	klog.Infof("response: %s", response)
 
 	// Try code block first (most specific)
 	codeBlockRegex := regexp.MustCompile("```(?:json)?\\n?(\\{.*?\\}|\\[.*?\\])\\n?```")

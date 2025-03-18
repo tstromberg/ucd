@@ -3,7 +3,6 @@ package ucd
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +24,7 @@ type Config struct {
 
 // AnalysisData contains collected code change information.
 type AnalysisData struct {
+	Source         string
 	Diff           string
 	CommitMessages string
 	Changelog      string
@@ -65,6 +65,7 @@ func Collect(cfg Config) (*AnalysisData, error) {
 		Changelog:      changelog,
 		VersionA:       cfg.VersionA,
 		VersionB:       cfg.VersionB,
+		Source:         cfg.RepoURL,
 	}, nil
 }
 
@@ -100,7 +101,7 @@ func collectFromGit(cfg Config) (diff, commitMsgs, changelog string, err error) 
 	if err != nil {
 		return "", "", "", fmt.Errorf("failed to create temp directory: %w", err)
 	}
-	defer os.RemoveAll(tempDir)
+	//	defer os.RemoveAll(tempDir)
 
 	// Clone the repository
 	_, err = runCommand("", "git", "clone", "--quiet", cfg.RepoURL, tempDir)
@@ -132,18 +133,10 @@ func collectFromGit(cfg Config) (diff, commitMsgs, changelog string, err error) 
 
 // getChangelogFromGit extracts changelog differences from a Git repository.
 func getChangelogFromGit(repoDir, versionA, versionB string) (string, error) {
-	// Look for common changelog filenames
-	patterns := []string{
-		"CHANGELOG.md", "CHANGELOG.txt", "CHANGELOG",
-		"changelog.md", "changelog.txt", "changelog",
-		"CHANGES.md", "changes.md",
-	}
-
 	// Find the first matching changelog file
 	var changelogFile string
-	for _, pattern := range patterns {
-		matches, _ := filepath.Glob(filepath.Join(repoDir, pattern))
-		if len(matches) > 0 {
+	for _, pattern := range []string{"CHANGELOG*", "changelog*", "CHANGES.md", "changes.md", "RELNOTES*"} {
+		if matches, _ := filepath.Glob(filepath.Join(repoDir, pattern)); len(matches) > 0 {
 			changelogFile = matches[0]
 			break
 		}
@@ -170,28 +163,42 @@ func getChangelogFromGit(repoDir, versionA, versionB string) (string, error) {
 		return "", fmt.Errorf("failed to get changelog at version %s: %w", versionB, err)
 	}
 
-	// Create a diff of the changelog using the diff command
-	// Note: We don't use runCommand here because diff returns non-zero exit code for differences
-	cmd := exec.Command("diff", "-u", "--label", versionA, "--label", versionB, "-", "-")
-	cmd.Stdin = io.MultiReader(
-		strings.NewReader(contentA),
-		strings.NewReader("\n"),
-		strings.NewReader(contentB),
-	)
+	// Create temporary files for both versions
+	fileA, err := os.CreateTemp("", "changelog-*")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer os.Remove(fileA.Name())
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	fileB, err := os.CreateTemp("", "changelog-*")
+	if err != nil {
+		os.Remove(fileA.Name())
+		return "", fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer os.Remove(fileB.Name())
 
-	// Ignore error since diff returns non-zero for differences
-	_ = cmd.Run()
-
-	// If there's something in stderr, it might indicate a real error
-	if stderr.Len() > 0 {
-		return stdout.String(), fmt.Errorf("diff command warning: %s", stderr.String())
+	// Write contents to temporary files
+	if err := os.WriteFile(fileA.Name(), []byte(contentA), 0o644); err != nil {
+		return "", fmt.Errorf("failed to write temp file: %w", err)
+	}
+	if err := os.WriteFile(fileB.Name(), []byte(contentB), 0o644); err != nil {
+		return "", fmt.Errorf("failed to write temp file: %w", err)
 	}
 
-	return stdout.String(), nil
+	// Run diff command on temp files
+	cmd := exec.Command("diff", "-u", "--label", versionA, "--label", versionB, fileA.Name(), fileB.Name())
+	out, _ := cmd.CombinedOutput()
+
+	// Extract only the lines starting with "+" and remove the "+" prefix
+	var newLines []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+			// Skip the diff header line (starting with +++)
+			newLines = append(newLines, line[1:])
+		}
+	}
+
+	return strings.Join(newLines, "\n"), nil
 }
 
 // collectFromFiles extracts data from provided files.

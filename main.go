@@ -131,6 +131,7 @@ func collectFromFiles(diffFile string) (*ucd.AnalysisData, error) {
 	return &ucd.AnalysisData{
 		VersionA:       versionA,
 		VersionB:       versionB,
+		Source:         diffFile,
 		Diff:           string(diff),
 		CommitMessages: string(commits),
 		Changelog:      string(changelog),
@@ -178,98 +179,64 @@ func outputJSON(result *ucd.Result) {
 
 // outputText prints the result in human-readable format with colors and emojis.
 func outputText(r *ucd.Result) {
-	// Setup formatters
-	titleFmt := color.New(color.Bold, color.FgCyan).PrintlnFunc()
-	sectionFmt := color.New(color.Bold, color.FgBlue).PrintlnFunc()
-	highlight := color.New(color.Bold, color.FgYellow).SprintFunc()
-	good := color.New(color.FgGreen).SprintFunc()
-	warning := color.New(color.FgYellow).SprintFunc()
-	danger := color.New(color.FgRed).SprintFunc()
+	// Setup color formatters - Apple uses subtle colors
+	title := color.New(color.FgHiBlue, color.Bold)
+	section := color.New(color.FgBlue, color.Bold)
+	highlight := color.New()
+	// color.FgBlack, color.Bold) // Apple often uses bold black for emphasis
+	success := color.New(color.FgHiGreen)
+	warning := color.New(color.FgYellow)
+	critical := color.New(color.FgHiRed)
 
-	titleFmt("✨ UCD: Undocumented Change Detector ✨")
-	fmt.Printf("Comparing %s → %s\n\n", versionA, versionB)
+	// Print header in Apple style - clean and minimal
+	title.Println("Undocumented Change Analysis")
+	fmt.Printf("%s: %s → %s\n\n", r.Input.Source, versionA, versionB)
 
-	// Helper functions for consistent formatting
-	getRatingDisplay := func(rating int, isMalware bool) (string, func(a ...interface{}) string) {
-		if isMalware {
-			// Malware emojis
-			switch {
-			case rating <= 2:
-				return "🔒", good
-			case rating <= 6:
-				return "⚠️", warning
-			default:
-				return "🚨", danger
-			}
-		} else {
-			// Security patch emojis
-			switch {
-			case rating <= 2:
-				return "🛡️ ", good
-			case rating <= 6:
-				return "🔧", warning
-			default:
-				return "🔓", danger
-			}
+	// Apple-style risk indicators - prefer text over emoji for enterprise tools
+	riskLevel := func(level int) string {
+		switch {
+		case level <= 2:
+			return success.Sprintf("Low (%d/10)", level)
+		case level <= 6:
+			return warning.Sprintf("Medium (%d/10)", level)
+		default:
+			return critical.Sprintf("High (%d/10)", level)
 		}
 	}
 
-	// Output summary if available
 	if r.Summary != nil {
-		sectionFmt("📊 RISK SUMMARY")
-
-		// Display malware risk
-		malwareEmoji, malwareColor := getRatingDisplay(r.Summary.MalwareRisk, true)
-		fmt.Printf("%s %s - malware\n",
-			malwareColor(malwareEmoji),
-			malwareColor(fmt.Sprintf("%d/10", r.Summary.MalwareRisk)))
-
-		// Display security patch risk
-		securityEmoji, securityColor := getRatingDisplay(r.Summary.SilentPatch, false)
-		fmt.Printf("%s %s - silent security patches\n",
-			securityColor(securityEmoji),
-			securityColor(fmt.Sprintf("%d/10", r.Summary.SilentPatch)))
-
-		fmt.Printf("\n%s\n\n", r.Summary.Description)
+		section.Println("Risk Assessment")
+		fmt.Printf("• Malicious Code: %s\n", riskLevel(r.Summary.MalwareRisk))
+		fmt.Printf("• Silent Security Patch: %s\n", riskLevel(r.Summary.SilentPatch))
+		fmt.Printf("• Summary: %s\n\n", r.Summary.Description)
 	}
 
-	if len(r.Changes) == 0 {
-		fmt.Println(good("✅ No undocumented behavioral changes found."))
+	// No changes case - clean confirmation
+	if len(r.UndocumentedChanges) == 0 {
+		fmt.Println(success.Sprint("No undocumented changes detected."))
 		return
 	}
 
-	// Sort changes by maximum severity
-	changes := r.Changes
-	sort.Slice(changes, func(i, j int) bool {
-		iMax := max(changes[i].MalwareRisk, changes[i].SilentPatch)
-		jMax := max(changes[j].MalwareRisk, changes[j].SilentPatch)
-		return iMax > jMax
+	// Sort changes by severity
+	sort.Slice(r.UndocumentedChanges, func(i, j int) bool {
+		return max(r.UndocumentedChanges[i].MalwareRisk, r.UndocumentedChanges[i].SilentPatch) >
+			max(r.UndocumentedChanges[j].MalwareRisk, r.UndocumentedChanges[j].SilentPatch)
 	})
 
-	sectionFmt(fmt.Sprintf("🔍 UNDOCUMENTED BEHAVIOR CHANGES (%d found)", len(changes)))
+	section.Printf("Undocumented Changes (%d)\n", len(r.UndocumentedChanges))
 
-	for _, change := range changes {
-		// Print basic change information
-		fmt.Printf("- %s\n", highlight(change.Description))
+	for _, c := range r.UndocumentedChanges {
+		fmt.Printf("• %s\n", highlight.Sprint(c.Description))
 
-		// Show malware risk if significant
-		if change.MalwareRisk > 5 {
-			malwareEmoji, malwareColor := getRatingDisplay(change.MalwareRisk, true)
-			fmt.Printf("  %s %s %s\n",
-				malwareEmoji,
-				malwareColor(fmt.Sprintf("%d/10 malware risk:", change.MalwareRisk)),
-				change.MalwareExplanation)
+		if c.MalwareRisk > 3 {
+			fmt.Printf("   • Malicious Code: %s\n     %s\n",
+				riskLevel(c.MalwareRisk), c.MalwareExplanation)
 		}
 
-		// Show security patch risk if significant
-		if change.SilentPatch > 5 {
-			securityEmoji, securityColor := getRatingDisplay(change.SilentPatch, false)
-			fmt.Printf("  %s %s %s\n",
-				securityEmoji,
-				securityColor(fmt.Sprintf("%d/10 hidden security patch:", change.SilentPatch)),
-				change.SilentExplanation)
+		if c.SilentPatch > 3 {
+			fmt.Printf("   • Security Patch: %s\n     %s\n",
+				riskLevel(c.SilentPatch), c.SilentExplanation)
 		}
-
 	}
 }
 
