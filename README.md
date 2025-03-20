@@ -2,6 +2,8 @@
 
 UCD helps security teams detect hidden code changes between software versions using Google's Gemini AI.
 
+It works by comparing code diffs against the stated commit messages and CHANGELOG entries, and then scoring them for maliciousness or attempts to covertly patch a critical security vulnerability.
+
 [![Go Report Card](https://goreportcard.com/badge/github.com/tstromberg/ucd)](https://goreportcard.com/report/github.com/tstromberg/ucd)
 [![Go Reference](https://pkg.go.dev/badge/github.com/tstromberg/ucd.svg)](https://pkg.go.dev/github.com/tstromberg/ucd)
 
