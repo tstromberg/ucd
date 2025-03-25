@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sort"
+	"strings"
 	"time"
 
 	"github.com/fatih/color"
@@ -177,67 +177,97 @@ func outputJSON(result *ucd.Result) {
 	fmt.Println(string(jsonData))
 }
 
-// outputText prints the result in human-readable format with colors and emojis.
 func outputText(r *ucd.Result) {
-	// Setup color formatters - Apple uses subtle colors
 	title := color.New(color.FgHiBlue, color.Bold)
 	section := color.New(color.FgBlue, color.Bold)
-	highlight := color.New()
-	// color.FgBlack, color.Bold) // Apple often uses bold black for emphasis
 	success := color.New(color.FgHiGreen)
 	warning := color.New(color.FgYellow)
 	critical := color.New(color.FgHiRed)
 
-	// Print header in Apple style - clean and minimal
-	title.Println("Undocumented Change Analysis")
-	fmt.Printf("%s: %s → %s\n\n", r.Input.Source, versionA, versionB)
-
-	// Apple-style risk indicators - prefer text over emoji for enterprise tools
+	// Risk level indicators with emoji
 	riskLevel := func(level int) string {
+		icon := "✓"
+		if level > 6 {
+			icon = "‼️"
+		} else if level > 2 {
+			icon = "⚠️"
+		}
+
+		text := fmt.Sprintf("%s  %2d/10  ", icon, level)
+
 		switch {
 		case level <= 2:
-			return success.Sprintf("Low (%d/10)", level)
+			return success.Sprint(text + "Low")
 		case level <= 6:
-			return warning.Sprintf("Medium (%d/10)", level)
+			return warning.Sprint(text + "Medium")
 		default:
-			return critical.Sprintf("High (%d/10)", level)
+			return critical.Sprint(text + "High")
 		}
 	}
 
+	// Header
+	title.Println("\n📊 Change Analysis Report")
+	fmt.Printf("   %s: %s → %s\n", r.Input.Source, versionA, versionB)
+	fmt.Println(strings.Repeat("─", 80))
+
+	// Risk Assessment
 	if r.Summary != nil {
-		section.Println("Risk Assessment")
-		fmt.Printf("• Malicious Code: %s\n", riskLevel(r.Summary.MalwareRisk))
-		fmt.Printf("• Silent Security Patch: %s\n", riskLevel(r.Summary.SilentPatch))
-		fmt.Printf("• Summary: %s\n\n", r.Summary.Description)
+		section.Println("\n🔍 Risk Assessment")
+		fmt.Printf("   Malicious Code Risk:  %s\n", riskLevel(r.Summary.MalwareRisk))
+		fmt.Printf("   Silent Security Risk: %s\n", riskLevel(r.Summary.SilentPatch))
+		fmt.Printf("\n   Summary: \n     %s\n", wordwrap(r.Summary.Description, 70, "     "))
+		fmt.Println(strings.Repeat("─", 80))
 	}
 
-	// No changes case - clean confirmation
+	// Changes
 	if len(r.UndocumentedChanges) == 0 {
-		fmt.Println(success.Sprint("No undocumented changes detected."))
+		fmt.Println("\n✅ No undocumented changes detected.\n")
 		return
 	}
 
-	// Sort changes by severity
-	sort.Slice(r.UndocumentedChanges, func(i, j int) bool {
-		return max(r.UndocumentedChanges[i].MalwareRisk, r.UndocumentedChanges[i].SilentPatch) >
-			max(r.UndocumentedChanges[j].MalwareRisk, r.UndocumentedChanges[j].SilentPatch)
-	})
+	section.Printf("\n🔎 Undocumented Changes (%d)\n\n", len(r.UndocumentedChanges))
 
-	section.Printf("Undocumented Changes (%d)\n", len(r.UndocumentedChanges))
-
-	for _, c := range r.UndocumentedChanges {
-		fmt.Printf("• %s\n", highlight.Sprint(c.Description))
+	for i, c := range r.UndocumentedChanges {
+		fmt.Printf("%d. %s\n", i+1, wordwrap(c.Description, 70, "   "))
 
 		if c.MalwareRisk > 3 {
-			fmt.Printf("   • Malicious Code: %s\n     %s\n",
-				riskLevel(c.MalwareRisk), c.MalwareExplanation)
+			fmt.Printf("\n   Malicious Code Risk: %s\n", riskLevel(c.MalwareRisk))
+			fmt.Printf("   %s\n", wordwrap(c.MalwareExplanation, 65, "   "))
 		}
 
 		if c.SilentPatch > 3 {
-			fmt.Printf("   • Security Patch: %s\n     %s\n",
-				riskLevel(c.SilentPatch), c.SilentExplanation)
+			fmt.Printf("\n   Security Patch Risk: %s\n", riskLevel(c.SilentPatch))
+			fmt.Printf("   %s\n", wordwrap(c.SilentExplanation, 65, "   "))
+		}
+		fmt.Println()
+	}
+}
+
+func wordwrap(text string, width int, indent ...string) string {
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return text
+	}
+
+	indentation := "     " // default indentation
+	if len(indent) > 0 {
+		indentation = indent[0]
+	}
+
+	var lines []string
+	current := words[0]
+
+	for _, word := range words[1:] {
+		if len(current)+1+len(word) > width {
+			lines = append(lines, current)
+			current = word
+		} else {
+			current += " " + word
 		}
 	}
+	lines = append(lines, current)
+
+	return strings.Join(lines, "\n"+indentation)
 }
 
 // Helper function to get the maximum of two integers

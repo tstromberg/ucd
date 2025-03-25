@@ -92,19 +92,19 @@ may be related to a commit message or changelog entry.
 Format your response as a JSON object with:
 
 - "undocumented_changes": An array of JSON objects for each undocumented behavioral change that could impact a user of this program, each with:
-  - "description": A concise 1-sentence description of the undocumented behavioral change
+  - "description": A terse, concise, and technical 1-sentence description of the undocumented behavioral change
   - "malware_risk": 0-10 danger scale of this undocumented change being malicious in nature. For example, could this undocumented change
         represent the addition of code for credential exfiltration, a backdoor, or a data wiper? (0=Benign, 5=Suspicious, 10=Extremely Dangerous)
-  - "malware_explanation": A 1-sentence explanation for the given malware_risk rating.
+  - "malware_explanation":  A terse, concise, and technical 1-sentence explanation for the given malware_risk rating.
   - "silent_patch": 0-10 likelihood of this undocumented change representing a hidden critical security patch (0=Benign, 5=Suspicious, 10=Extremely Dangerous)
   - "silent_explanation": Your explanation for your silent_patch rating.
 
-- "summary": A JSON object that assesses the combined impact of the undocumented behavioral changes you've found:
-  - "description": A concise 1-sentence description of the combined undocumented behavioral changes.
+- "summary": A JSON object that assesses the full combined impact of the undocumented behavioral changes you've found:
+  - "description": A terse, concise, and technical 1-sentence description of the combined undocumented behavioral changes.
   - "malware_risk": 0-10 danger scale of all combined changes considered together (0=Benign, 5=Suspicious, 10=Extremely Dangerous)
-  - "malware_explanation": A 1-sentence explanation for your combined malware risk rating.
+  - "malware_explanation": A terse, concise, and technical 1-sentence explanation for your combined malware risk rating.
   - "silent_patch": 0-10 likelihood of a silent critical security patch introduced in this version change (0=Benign, 5=Suspicious, 10=Extremely Dangerous)
-  - "silent_explanation": Your explanation for your combined silent_patch rating.
+  - "silent_explanation":  A terse, concise, and technical explanation for your combined silent_patch rating.
 
 Do not include changes mentioned in the Changelog or commit messages.
 

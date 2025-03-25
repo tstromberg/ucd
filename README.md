@@ -13,20 +13,7 @@ It works by comparing code diffs against the stated commit messages and CHANGELO
 
 For example, when analyzing the recent supply-chain attack that introduced a [malicious commit to reviewdog/action-setup](https://github.com/reviewdog/action-setup/commit/f0d342), ucd reports:
 
-```log
-Undocumented Change Analysis
-/Users/t/Downloads/f0d342.patch.txt: v0 → v1
-
-Risk Assessment
-• Malicious Code: High (9/10)
-• Silent Security Patch: Low (2/10)
-• Summary: The install script now contains code to potentially read process memory and extract environment variables, which represents a potential supply chain risk.
-
-Undocumented Changes (1)
-• The install script now executes a base64-encoded Python script, `$TEMP/runner_script.py`, which attempts to find the PID of a `Runner.Worker` process, reads its memory maps, and outputs readable regions to standard output, after which the output is further processed by `grep`, `sort`, and `base64` before being stored in the `VALUES` environment variable if running on a github-hosted Linux runner.
-   • Malicious Code: High (9/10)
-     The script attempts to read memory regions of a process named `Runner.Worker`, which could be used to extract secrets, environment variables, or other sensitive information, and the `VALUES` variable is printed to standard output.
-```
+![screenshot](images/screenshot.png?raw=true "screenshot")
 
 ## Install
 
