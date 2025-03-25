@@ -82,6 +82,12 @@ may be related to a commit message or changelog entry.
   * For example, don't include documentation updates, changes that can come up in code refactoring, CI/CD configuration changes, or performance improvements.
 - Ignore changes to files within the .github directory, as they will not impact the users of this tool.
 - Unless you know of a specific security threat for a package version, assume that dependency version bumps are not part of a silent security fix.
+- Be particularly on the lookout for possible supply-chain security attacks that would impact an open-source project. For exampel:
+  * The introduction of a silent network backdoor
+  * The addition of obfuscated or encoded text that does not match the surrounding code
+  * Execution of external commands, especially ones that fetch URLs or decode strings
+  * Cryptomining attacks
+  * Credential theft
 
 Format your response as a JSON object with:
 
