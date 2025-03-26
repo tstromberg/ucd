@@ -1,19 +1,23 @@
-# UCD: Undocumented Change Detector
+# UCD: Undocumented Change Detector 🕵️‍♀️
 
-UCD helps security teams detect hidden code changes between software versions using Google's Gemini AI.
+UCD is your AI-powered security sidekick that helps detect sneaky code changes between software versions using Google's Gemini AI.
 
-It works by comparing code diffs against the stated commit messages and CHANGELOG entries, and then scoring them for maliciousness or attempts to covertly patch a critical security vulnerability.
+It works by comparing code diffs against commit messages and CHANGELOG entries, then scoring them for potential maliciousness or attempts to silently patch security vulnerabilities. Think of it as a lie detector for your code!
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/tstromberg/ucd)](https://goreportcard.com/report/github.com/tstromberg/ucd)
 [![Go Reference](https://pkg.go.dev/badge/github.com/tstromberg/ucd.svg)](https://pkg.go.dev/github.com/tstromberg/ucd)
 
-> **Note:** Experimental project. Results should be manually verified.
+> **Note:** Experimental project. Raw unpolished interface.
 
 ## Example Output
 
 For example, when analyzing the recent supply-chain attack that introduced a [malicious commit to reviewdog/action-setup](https://github.com/reviewdog/action-setup/commit/f0d342), ucd reports:
 
 ![screenshot](images/screenshot.png?raw=true "screenshot")
+
+Here's what benign undocumented changes look like for the `apko` git repo:
+
+![screenshot](images/screenshot2.png?raw=true "screenshot")
 
 ## Install
 
@@ -24,7 +28,7 @@ go install github.com/tstromberg/ucd@latest
 ## Usage
 
 ```bash
-# Set API key
+# Set API key (or pass it with -api-key flag)
 export GEMINI_API_KEY=YOUR_API_KEY
 
 # Analyze a Git repository
@@ -36,9 +40,32 @@ ucd -a v0.25.3 -b v0.25.4 git https://github.com/org/repo.git
 # Analyze a local diff file
 ucd file changes.patch
 
-# Output in JSON format
+# Add commit messages and changelog for better results
+ucd -commit-messages commits.txt -changelog changes.md file changes.patch
+
+# Use a different Gemini model
+ucd -model gemini-2.0-pro git https://github.com/org/repo.git
+
+# Get debug information
+ucd -debug git https://github.com/org/repo.git
+
+# Output in JSON format for further processing
 ucd -json git https://github.com/org/repo.git
 ```
+
+## Available Options
+
+| Flag | Description |
+|------|-------------|
+| `-a` | Version A (old version), defaults to "v0" |
+| `-b` | Version B (new version), defaults to "v1" |
+| `-diff` | File containing unified diff |
+| `-commit-messages` | File containing commit messages |
+| `-changelog` | File containing changelog entries |
+| `-api-key` | Google API key for Gemini (alternatively use GEMINI_API_KEY env var) |
+| `-model` | Gemini model to use (default: "gemini-2.0-flash") |
+| `-json` | Output results in JSON format |
+| `-debug` | Enable debug output |
 
 ## Go API Example
 
@@ -87,5 +114,5 @@ func main() {
 ## Requirements
 
 * Go 1.18+
-* Gemini API Key
+* Gemini API Key (get one from [Google AI Studio](https://ai.google.dev/))
 * Git (for repository analysis)

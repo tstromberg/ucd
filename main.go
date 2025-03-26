@@ -214,7 +214,7 @@ func outputText(r *ucd.Result) {
 	if r.Summary != nil {
 		section.Println("\n🔍 Risk Assessment")
 		fmt.Printf("   Malicious Code Risk:  %s\n", riskLevel(r.Summary.MalwareRisk))
-		fmt.Printf("   Silent Security Risk: %s\n", riskLevel(r.Summary.SilentPatch))
+		fmt.Printf("   Silent Security Patch Risk: %s\n", riskLevel(r.Summary.SilentPatch))
 		fmt.Printf("\n   Summary: \n     %s\n", wordwrap(r.Summary.Description, 70, "     "))
 		fmt.Println(strings.Repeat("─", 80))
 	}
@@ -236,7 +236,7 @@ func outputText(r *ucd.Result) {
 		}
 
 		if c.SilentPatch > 3 {
-			fmt.Printf("\n   Security Patch Risk: %s\n", riskLevel(c.SilentPatch))
+			fmt.Printf("\n   Silent Security Patch Risk: %s\n", riskLevel(c.SilentPatch))
 			fmt.Printf("   %s\n", wordwrap(c.SilentExplanation, 65, "   "))
 		}
 		fmt.Println()
