@@ -1,11 +1,11 @@
 # UCD: Undocumented Change Detector 🕵️‍♀️
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/tstromberg/ucd)](https://goreportcard.com/report/github.com/tstromberg/ucd)
+[![Go Reference](https://pkg.go.dev/badge/github.com/tstromberg/ucd.svg)](https://pkg.go.dev/github.com/tstromberg/ucd)
+
 UCD is your AI-powered security sidekick that helps detect sneaky code changes between software versions using Google's Gemini AI.
 
 It works by comparing code diffs against commit messages and CHANGELOG entries, then scoring them for potential maliciousness or attempts to silently patch security vulnerabilities. Think of it as a lie detector for your code!
-
-[![Go Report Card](https://goreportcard.com/badge/github.com/tstromberg/ucd)](https://goreportcard.com/report/github.com/tstromberg/ucd)
-[![Go Reference](https://pkg.go.dev/badge/github.com/tstromberg/ucd.svg)](https://pkg.go.dev/github.com/tstromberg/ucd)
 
 > **Note:** Experimental project. Raw unpolished interface.
 
