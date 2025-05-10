@@ -1,12 +1,15 @@
 package ucd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
+	"text/template"
 
-	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/genai"
 	"k8s.io/klog/v2"
 )
 
@@ -32,7 +35,7 @@ type Result struct {
 // AnalyzeChanges performs AI-based analysis of code changes.
 func AnalyzeChanges(ctx context.Context, client *genai.Client, data *AnalysisData, modelName string) (*Result, error) {
 	if modelName == "" {
-		modelName = "gemini-2.0-flash"
+		modelName = "gemini-2.5-pro-preview-05-06"
 	}
 
 	prompt, err := buildPrompt(data)
@@ -40,18 +43,36 @@ func AnalyzeChanges(ctx context.Context, client *genai.Client, data *AnalysisDat
 		return nil, fmt.Errorf("build prompt: %w", err)
 	}
 
-	model := client.GenerativeModel(modelName)
+	// Create generation config for the new API
+	genConfig := &genai.GenerateContentConfig{
+		Temperature: genai.Ptr[float32](0.0),
+		Seed:        genai.Ptr[int32](0),
+	}
+
 	klog.V(1).Infof("prompt: %s", prompt)
-	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+
+	// Generate content using the new API structure
+	// client.Models provides access to model-specific methods like GenerateContent.
+	// genai.Text(prompt) returns []*genai.Content, which is the expected type for the 'contents' parameter.
+	resp, err := client.Models.GenerateContent(ctx, modelName, genai.Text(prompt), genConfig)
 	if err != nil {
 		return nil, fmt.Errorf("generate content: %w", err)
 	}
 
-	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
-		return nil, fmt.Errorf("no response from AI model")
+	// Check for valid response and parts
+	if resp == nil || len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil || len(resp.Candidates[0].Content.Parts) == 0 {
+		return nil, fmt.Errorf("no response or valid parts from AI model")
 	}
 
-	responseText := string(resp.Candidates[0].Content.Parts[0].(genai.Text))
+	// Extract the text from the response using strings.Builder for efficiency
+	var responseTextBuilder strings.Builder
+	for _, part := range resp.Candidates[0].Content.Parts {
+		// In the new API, each part is a *genai.Part, which has a Text field (string).
+		if part.Text != "" {
+			responseTextBuilder.WriteString(part.Text)
+		}
+	}
+	responseText := responseTextBuilder.String()
 	r, err := parseAIResponse(responseText)
 	if err != nil {
 		return nil, fmt.Errorf("parse failure: %w", err)
@@ -61,15 +82,16 @@ func AnalyzeChanges(ctx context.Context, client *genai.Client, data *AnalysisDat
 	return r, err
 }
 
-// buildPrompt constructs the prompt for the AI model.
-func buildPrompt(data *AnalysisData) (string, error) {
-	prompt := fmt.Sprintf(`
+const promptTemplateStr = `
 You are a security expert and malware analyst studying the changes between two versions of an
 open-source program that you are not familiar with.
 
+{{with .ProgramName}}The name of the program we are analyzing is "{{.}}", you may know about it already.{{end}}
+{{with.ProgramDesc}}The description of the program we are analyzing is: "{{.}}"{{end}}
+
 I will provide:
 
-1. A unified diff of changes between version %s and %s collected from %s
+1. A unified diff of changes between version {{.VersionA}} and {{.VersionB}} collected from {{.Source}}
 2. Commit messages describing changes (if available)
 3. Changelog entries (if available)
 
@@ -113,22 +135,43 @@ If there are no undocumented behavior changes, return an empty changes array. Yo
 Here are the details to analyze:
 
 UNIFIED DIFF:
-%s
+{{.Diff}}
 
 COMMIT MESSAGES:
-%s
+{{.CommitMessages}}
 
 CHANGELOG CHANGES:
-%s
+{{.Changelog}}
 
 Ensure that the returned data is in valid JSON form.
-`, data.VersionA, data.VersionB, data.Source, data.Diff, data.CommitMessages, data.Changelog)
+`
+
+var promptTmpl *template.Template
+
+func init() {
+	var err error
+	promptTmpl, err = template.New("prompt").Parse(promptTemplateStr)
+	if err != nil {
+		// This would be a panic because it's a programming error if the template is invalid
+		panic(fmt.Sprintf("failed to parse prompt template: %v", err))
+	}
+}
+
+// buildPrompt constructs the prompt for the AI model.
+func buildPrompt(data *AnalysisData) (string, error) {
+	var buf bytes.Buffer
+	if err := promptTmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("execute prompt template: %w", err)
+	}
+
+	prompt := buf.String()
 
 	// Truncate if too long
 	const maxPromptLength = 2000000
 	if len(prompt) > maxPromptLength {
 		return "", fmt.Errorf("too much data to analyze (%d length)", maxPromptLength)
 	}
+	//	fmt.Printf("prompt: %s\n", prompt)
 	return prompt, nil
 }
 

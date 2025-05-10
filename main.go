@@ -11,8 +11,7 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/google/generative-ai-go/genai"
-	"google.golang.org/api/option"
+	"google.golang.org/genai"
 
 	"github.com/tstromberg/ucd/pkg/ucd"
 )
@@ -22,6 +21,8 @@ var (
 	versionB    string
 	diffFile    string
 	changesFile string
+	programName string
+	programDesc string
 	commitsFile string
 	apiKey      string
 	modelName   string
@@ -36,7 +37,10 @@ func init() {
 	flag.StringVar(&commitsFile, "commit-messages", "", "File containing commit messages")
 	flag.StringVar(&changesFile, "changelog", "", "File containing changelog entries")
 	flag.StringVar(&apiKey, "api-key", "", "Google API key for Gemini")
-	flag.StringVar(&modelName, "model", "gemini-2.0-flash", "Gemini model to use")
+	flag.StringVar(&programName, "name", "", "name of program for context")
+	flag.StringVar(&programDesc, "description", "", "description of program for context")
+
+	flag.StringVar(&modelName, "model", "gemini-2.5-flash-preview-04-17", "Gemini model to use")
 	flag.BoolVar(&jsonOutput, "json", false, "Output results in JSON format")
 	flag.BoolVar(&debugMode, "debug", false, "Enable debug output")
 }
@@ -60,6 +64,10 @@ func main() {
 // collectData gathers the required information for analysis
 func collectData() *ucd.AnalysisData {
 	args := flag.Args()
+	if len(args) < 2 {
+		log.Fatalf("syntax: ucd [file|git] [source]")
+	}
+
 	source := args[1]
 	var data *ucd.AnalysisData
 	var err error
@@ -94,9 +102,11 @@ func collectFromGit(repoURL string) (*ucd.AnalysisData, error) {
 	}
 
 	config := ucd.Config{
-		RepoURL:  repoURL,
-		VersionA: versionA,
-		VersionB: versionB,
+		RepoURL:     repoURL,
+		VersionA:    versionA,
+		VersionB:    versionB,
+		ProgramName: programName,
+		ProgramDesc: programDesc,
 	}
 
 	return ucd.Collect(config)
@@ -132,6 +142,8 @@ func collectFromFiles(diffFile string) (*ucd.AnalysisData, error) {
 		VersionA:       versionA,
 		VersionB:       versionB,
 		Source:         diffFile,
+		ProgramName:    programName,
+		ProgramDesc:    programDesc,
 		Diff:           string(diff),
 		CommitMessages: string(commits),
 		Changelog:      string(changelog),
@@ -144,11 +156,14 @@ func analyzeData(data *ucd.AnalysisData) *ucd.Result {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	client, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
+	// Create client with API key using ClientConfig
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey:  apiKey,
+		Backend: genai.BackendGeminiAPI, // Explicitly set backend
+	})
 	if err != nil {
 		log.Fatalf("Error creating client: %v", err)
 	}
-	defer client.Close()
 
 	// Analyze the changes
 	result, err := ucd.AnalyzeChanges(ctx, client, data, modelName)
@@ -206,7 +221,11 @@ func outputText(r *ucd.Result) {
 	}
 
 	// Header
-	title.Println("\n📊 Change Analysis Report")
+	if programName != "" {
+		title.Printf("\n📊 %s – Change Analysis Report\n", programName)
+	} else {
+		title.Println("\n📊 Change Analysis Report")
+	}
 	fmt.Printf("   %s: %s → %s\n", r.Input.Source, versionA, versionB)
 	fmt.Println(strings.Repeat("─", 80))
 

@@ -16,6 +16,8 @@ type Config struct {
 	DiffPath      string
 	ChangelogPath string
 	CommitMsgs    string
+	ProgramName   string
+	ProgramDesc   string
 
 	// Optional version identifiers
 	VersionA string
@@ -30,6 +32,8 @@ type AnalysisData struct {
 	Changelog      string
 	VersionA       string
 	VersionB       string
+	ProgramName    string
+	ProgramDesc    string
 }
 
 // Collect gathers all necessary data for analysis based on the provided config.
@@ -66,6 +70,8 @@ func Collect(cfg Config) (*AnalysisData, error) {
 		VersionA:       cfg.VersionA,
 		VersionB:       cfg.VersionB,
 		Source:         cfg.RepoURL,
+		ProgramName:    cfg.ProgramName,
+		ProgramDesc:    cfg.ProgramDesc,
 	}, nil
 }
 
