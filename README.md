@@ -7,7 +7,7 @@ UCD is your AI-powered security sidekick that helps detect sneaky code changes b
 
 It works by comparing code diffs against commit messages and CHANGELOG entries, then scoring them for potential maliciousness or attempts to silently patch security vulnerabilities. Think of it as a lie detector for your code!
 
-> **NOTE:** This is a technology demo more than a fully usable OSS project. It's still surprisingly good at finding malicious code.
+> **NOTE:** This is a vibe-coded tech demo more than a fully usable OSS project. It's still surprisingly good at finding malicious code.
 ## Example Output
 
 For example, when analyzing the recent supply-chain attack that introduced a [malicious commit to reviewdog/action-setup](https://github.com/reviewdog/action-setup/commit/f0d342), ucd reports:
